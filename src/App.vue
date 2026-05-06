@@ -21,6 +21,7 @@ const wsConnected = ref(false)
 const toastText = ref('')
 let toastTimer = 0
 let ws = null
+let reconnectTimer = 0
 
 function goPlay() {
   mode.value = 'play'
@@ -64,6 +65,13 @@ function connectWs() {
     },
     onClose: () => {
       wsConnected.value = false
+      ws = null
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      if (session.value.token && ['onlineLobby', 'onlineRoom', 'onlinePlay'].includes(mode.value)) {
+        reconnectTimer = window.setTimeout(() => {
+          connectWs()
+        }, 1200)
+      }
     },
     onError: () => {
       wsConnected.value = false
@@ -73,6 +81,10 @@ function connectWs() {
 
 function disconnectWs() {
   if (!ws) return
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = 0
+  }
   ws.close()
   ws = null
   wsConnected.value = false

@@ -1,9 +1,29 @@
 import { apiBase } from './httpClient.js'
 
-const WS_BASE = (import.meta.env.VITE_WS_BASE || apiBase).replace(/^http/, 'ws')
+function toWsBase(raw) {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  if (text.startsWith('ws://') || text.startsWith('wss://')) return text
+  if (text.startsWith('http://')) return `ws://${text.slice('http://'.length)}`
+  if (text.startsWith('https://')) return `wss://${text.slice('https://'.length)}`
+  if (text.startsWith('/')) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${window.location.host}${text}`
+  }
+  return text
+}
+
+function resolveWsBase() {
+  const envWs = toWsBase(import.meta.env.VITE_WS_BASE)
+  if (envWs) return envWs
+  // 不再直接沿用 API_BASE 的路径，避免把 /api 误拼成 /api/ws
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${window.location.host}`
+}
 
 export function createWsClient(token, onEvent, hooks = {}) {
-  const ws = new WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`)
+  const base = resolveWsBase().replace(/\/+$/, '')
+  const ws = new WebSocket(`${base}/ws?token=${encodeURIComponent(token)}`)
   ws.onopen = () => hooks.onOpen?.()
   ws.onclose = () => hooks.onClose?.()
   ws.onerror = () => hooks.onError?.()
