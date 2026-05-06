@@ -16,6 +16,9 @@ function toWsBase(raw) {
 function resolveWsBase() {
   const envWs = toWsBase(import.meta.env.VITE_WS_BASE)
   if (envWs) return envWs
+  // 显式配置了 API_BASE 时（常见于线上前后端分域），优先使用它推导 WS 地址
+  const envApi = toWsBase(import.meta.env.VITE_API_BASE)
+  if (envApi) return envApi
   // 本地开发优先跟随 API_BASE（通常前端:5173，后端:4179）
   if (import.meta.env.DEV) {
     const fromApi = toWsBase(apiBase)

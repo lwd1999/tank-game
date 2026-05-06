@@ -5,7 +5,16 @@ import { currentLobbyRooms, getRoomById, handleRoomAction, removeUserFromRoom, r
 
 function safeSend(ws, data) {
   if (ws.readyState !== 1) return
-  ws.send(JSON.stringify(data))
+  try {
+    ws.send(JSON.stringify(data))
+  } catch (e) {
+    console.error('[ws-safeSend] serialize/send failed:', e?.message || e)
+    try {
+      ws.close()
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function parseTokenFromUrl(url) {
