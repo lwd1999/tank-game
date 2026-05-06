@@ -1,0 +1,10 @@
+{
+  "users": [
+    {
+      "id": "ff3e7d93-6fd3-421d-bf39-cad95034a382",
+      "username": "狠毒男孩",
+      "passwordHash": "$2a$10$NKj2tfBPlGmBEqNsv5Kr9.heGdlyqFliZn6T7qFriqHiN5M7x0D6K",
+      "createdAt": 1778034066185
+    }
+  ]
+}
