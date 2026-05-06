@@ -138,7 +138,8 @@ export function buildLocalInput(keys, pending, controls) {
     fire: false,
     toggleWeapon: pending.p1ToggleWeapon,
     useSkill: pending.p1UseSkill,
-    p2: { turn: null, move: false, fire: false, toggleWeapon: pending.p2ToggleWeapon, useSkill: pending.p2UseSkill },
+    cursor: null,
+    p2: { turn: null, move: false, fire: false, toggleWeapon: pending.p2ToggleWeapon, useSkill: pending.p2UseSkill, cursor: null },
   }
 
   if (hasAny(keys, p1.up)) input.turn = 'up'

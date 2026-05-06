@@ -5,6 +5,24 @@
       "username": "狠毒男孩",
       "passwordHash": "$2a$10$NKj2tfBPlGmBEqNsv5Kr9.heGdlyqFliZn6T7qFriqHiN5M7x0D6K",
       "createdAt": 1778034066185
+    },
+    {
+      "id": "0c23280f-2870-4124-96ab-87314185de79",
+      "username": "奶油小生",
+      "passwordHash": "$2a$10$VMVO3gOssTpfKqxm9n6ZW.YgOLGYgaurPwHyRAM31Csq.VxwrTKh2",
+      "createdAt": 1778051525746
+    },
+    {
+      "id": "c6bc6fdb-a498-49b1-adb8-dc889138f504",
+      "username": "u1778070196311",
+      "passwordHash": "$2a$10$hzYB6N82v39XB5pDQ.06EeDJXTrsent6hBmHq5/Af9SdWIWKabL6u",
+      "createdAt": 1778070196444
+    },
+    {
+      "id": "4e92b801-8a91-4dcf-b487-b879e59b3952",
+      "username": "u1778070268171",
+      "passwordHash": "$2a$10$NKFAWARUgXqn/aJHv4iAUuQqNsU5YHGoffuedf94cKdd7rCnQFdFq",
+      "createdAt": 1778070268286
     }
   ]
 }

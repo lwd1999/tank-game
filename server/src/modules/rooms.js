@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { createDefaultMap } from '../../../src/game/defaultMap.js'
+import { setCustomSkill } from '../../../src/game/engine.js'
+import { compileSkillSource } from '../../../src/game/customSkillPresets.js'
 import { ACTIVE_SLOTS_DEFAULT } from '../config.js'
 import { createGameSession } from './gameLoop.js'
 
@@ -35,10 +37,18 @@ export function roomView(room) {
       ready: p.ready,
       keybinds: p.keybinds,
       connected: p.connected,
+      skillConfig: p.skillConfig || null,
     })),
     spectators: room.spectators.map((s) => ({ userId: s.userId, username: s.username })),
     mapConfig: room.mapConfig,
   }
+}
+
+function applyPlayerSkillToSession(room, player) {
+  if (!room?.session?.state || !player) return
+  const owner = player.slot === 0 ? 'p1' : player.slot === 1 ? 'p2' : null
+  if (!owner) return
+  setCustomSkill(room.session.state, owner, player.skillRuntime || null)
 }
 
 function findParticipant(room, userId) {
@@ -60,6 +70,8 @@ function joinRoom(room, user) {
       ready: false,
       keybinds: defaultKeybinds(),
       connected: true,
+      skillConfig: null,
+      skillRuntime: null,
     }
     room.players.push(player)
     return { role: 'player', data: player }
@@ -191,6 +203,7 @@ export function handleRoomAction(roomId, user, type, payload, emitRoom) {
   if (type === 'room:map' && user.id === room.ownerId) {
     room.mapConfig = payload?.mapConfig || room.mapConfig
   }
+  if (type === 'room:skill' && actor.role !== 'player') return { error: '观战席不可配置技能' }
   if (type === 'room:start') {
     const canStart =
       user.id === room.ownerId &&
@@ -205,7 +218,40 @@ export function handleRoomAction(roomId, user, type, payload, emitRoom) {
         emitRoom(room.id, 'room:update', { room: roomView(room) })
       }
     })
+    for (const p of room.players) applyPlayerSkillToSession(room, p)
     room.session.start()
+  }
+  if (type === 'room:skill' && actor.role === 'player') {
+    const unload = payload?.unload === true
+    const source = String(payload?.source || '').trim()
+    if (unload || !source) {
+      actor.data.skillRuntime = null
+      actor.data.skillConfig = null
+      applyPlayerSkillToSession(room, actor.data)
+    } else {
+      let runtimeDef = null
+      try {
+        runtimeDef = compileSkillSource(source)
+      } catch (e) {
+        return { error: `技能代码错误：${e?.message || '编译失败'}` }
+      }
+      const name = String(payload?.name || '联机自定义技能').trim() || '联机自定义技能'
+      const cooldownMs = Math.max(0, Number(payload?.cooldownMs) || 0)
+      const id = `online-custom-${Date.now()}-${actor.data.userId}`
+      actor.data.skillRuntime = {
+        id,
+        name,
+        cooldownMs,
+        ...runtimeDef,
+      }
+      actor.data.skillConfig = {
+        id,
+        name,
+        cooldownMs,
+        source,
+      }
+      applyPlayerSkillToSession(room, actor.data)
+    }
   }
   if (type === 'game:input' && actor.role === 'player' && room.status === 'playing' && room.session) {
     room.session.setInput(actor.data.slot, payload || {})

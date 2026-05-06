@@ -16,7 +16,12 @@ function toWsBase(raw) {
 function resolveWsBase() {
   const envWs = toWsBase(import.meta.env.VITE_WS_BASE)
   if (envWs) return envWs
-  // 不再直接沿用 API_BASE 的路径，避免把 /api 误拼成 /api/ws
+  // 本地开发优先跟随 API_BASE（通常前端:5173，后端:4179）
+  if (import.meta.env.DEV) {
+    const fromApi = toWsBase(apiBase)
+    if (fromApi) return fromApi
+  }
+  // 线上默认跟随当前站点域名，交给反向代理转发 /ws
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${window.location.host}`
 }

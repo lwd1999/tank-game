@@ -269,6 +269,104 @@ function drawLaser(ctx, flash, cell) {
   ctx.restore()
 }
 
+function drawCustomShell(ctx, fx, cell) {
+  const p = 1 - Math.max(0, Math.min(1, fx.ms / Math.max(1, fx.dur)))
+  const x = (fx.fc + (fx.tc - fx.fc) * p) * cell + cell / 2
+  const y = (fx.fr + (fx.tr - fx.fr) * p) * cell + cell / 2
+  const r = Math.max(3, cell * 0.18)
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r)
+  g.addColorStop(0, '#fff4d6')
+  g.addColorStop(0.55, '#f59e0b')
+  g.addColorStop(1, '#7c2d12')
+  ctx.save()
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawCustomExplosion(ctx, fx, cell) {
+  if (fx.delayMs > 0) return
+  const p = 1 - Math.max(0, Math.min(1, fx.ms / Math.max(1, fx.dur)))
+  const x = fx.c * cell + cell / 2
+  const y = fx.r * cell + cell / 2
+  const maxR = (fx.radius + 0.6) * cell
+  const r = Math.max(2, maxR * p)
+  ctx.save()
+  ctx.strokeStyle = `rgba(251,146,60,${0.8 - p * 0.6})`
+  ctx.lineWidth = Math.max(2, cell * 0.12)
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.fillStyle = `rgba(251,191,36,${0.18 - p * 0.12})`
+  ctx.beginPath()
+  ctx.arc(x, y, r * 0.65, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawCustomProjectile(ctx, p, cell) {
+  const x = p.x * cell + cell / 2
+  const y = p.y * cell + cell / 2
+  const r = Math.max(2, cell * (p.size || 0.16))
+  ctx.save()
+  ctx.fillStyle = p.color || '#f97316'
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+  ctx.lineWidth = Math.max(1, r * 0.28)
+  ctx.beginPath()
+  ctx.arc(x - r * 0.2, y - r * 0.2, r * 0.48, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawChainLaser(ctx, fx, cell) {
+  if (fx.delayMs > 0) return
+  const x1 = fx.fc * cell + cell / 2
+  const y1 = fx.fr * cell + cell / 2
+  const x2 = fx.tc * cell + cell / 2
+  const y2 = fx.tr * cell + cell / 2
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const len = Math.max(1, Math.hypot(dx, dy))
+  const nx = -dy / len
+  const ny = dx / len
+  const alpha = Math.max(0.18, Math.min(1, fx.ms / Math.max(1, fx.dur)))
+  const amp = Math.max(3, cell * 0.22)
+  const seed = (fx.seed || 1) * 0.001
+  const points = [{ x: x1, y: y1 }]
+  const segments = 5
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments
+    const bx = x1 + dx * t
+    const by = y1 + dy * t
+    const wobble = Math.sin((seed + t * 7.1 + i * 0.73) * Math.PI) * amp * (0.55 + i * 0.08)
+    points.push({ x: bx + nx * wobble, y: by + ny * wobble })
+  }
+  points.push({ x: x2, y: y2 })
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = `rgba(56,189,248,${0.22 * alpha})`
+  ctx.lineWidth = Math.max(6, cell * 0.34)
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y)
+  ctx.stroke()
+
+  ctx.strokeStyle = fx.color || `rgba(125,211,252,${0.96 * alpha})`
+  ctx.lineWidth = Math.max(2, cell * 0.13)
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y)
+  ctx.stroke()
+  ctx.restore()
+}
+
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} state
@@ -354,6 +452,19 @@ export function drawBattlefield(ctx, state, opts) {
   for (const b of state.bullets) {
     const lerp = Math.max(0, Math.min(1, (state.lastBulletTick || 0) / BULLET_STEP_MS))
     drawBullet(ctx, b, cell, lerp)
+  }
+  for (const p of state.customProjectiles || []) {
+    drawCustomProjectile(ctx, p, cell)
+  }
+
+  if (state.customFx?.shells) {
+    for (const fx of state.customFx.shells) drawCustomShell(ctx, fx, cell)
+  }
+  if (state.customFx?.explosions) {
+    for (const fx of state.customFx.explosions) drawCustomExplosion(ctx, fx, cell)
+  }
+  if (state.customFx?.chainLasers) {
+    for (const fx of state.customFx.chainLasers) drawChainLaser(ctx, fx, cell)
   }
 
   if (state.laserFlash && state.laserFlash.ms > 0) {

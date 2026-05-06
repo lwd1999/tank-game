@@ -4,6 +4,7 @@ import KeybindPanel from '../components/KeybindPanel.vue'
 import RoomRoster from '../components/RoomRoster.vue'
 import CenterDialog from '../components/CenterDialog.vue'
 import RoomMapEditor from '../components/RoomMapEditor.vue'
+import { SKILL_CODE_TEMPLATE, SKILL_PRESETS } from '../game/customSkillPresets.js'
 import { COLS, ROWS } from '../game/constants.js'
 import { tileClassSuffix } from '../game/tiles.js'
 
@@ -12,10 +13,15 @@ const props = defineProps({
   user: { type: Object, required: true },
   connected: { type: Boolean, default: false },
 })
-const emit = defineEmits(['leave', 'ready', 'start', 'syncMap', 'updateKeybinds', 'play', 'closeRoom'])
+const emit = defineEmits(['leave', 'ready', 'start', 'syncMap', 'updateKeybinds', 'updateSkill', 'closeRoom'])
 
 const mapEditOpen = ref(false)
 const draftMap = ref({ walls: [], enemies: [], playerSpawns: [] })
+const skillPreset = ref('none')
+const skillName = ref('联机自定义技能')
+const skillCooldown = ref(2600)
+const skillSource = ref(SKILL_CODE_TEMPLATE)
+const skillHint = ref('每位上场玩家可配置自己的技能；开局自动生效，对局中可热更新')
 
 watch(
   () => props.room.mapConfig,
@@ -50,6 +56,11 @@ const ownerName = computed(() => {
   const s = props.room.spectators.find((x) => x.userId === props.room.ownerId)
   return p?.username || s?.username || '未知'
 })
+const roomSkillText = computed(() => {
+  const p1 = props.room.players.find((p) => p.slot === 0)?.skillConfig?.name || '未装配'
+  const p2 = props.room.players.find((p) => p.slot === 1)?.skillConfig?.name || '未装配'
+  return `P1：${p1} ｜ P2：${p2}`
+})
 
 const previewCells = computed(() => {
   const out = []
@@ -65,6 +76,42 @@ function hasSpawn(r, c) {
 }
 function hasEnemy(r, c) {
   return props.room.mapConfig?.enemies?.some((e) => e.r === r && e.c === c)
+}
+
+watch(
+  () => props.room.players,
+  () => {
+    const pick = mePlayer()?.skillConfig
+    if (!pick) return
+    skillName.value = pick.name || skillName.value
+    skillCooldown.value = Number.isFinite(Number(pick.cooldownMs)) ? Number(pick.cooldownMs) : skillCooldown.value
+    skillSource.value = pick.source || skillSource.value
+  },
+  { immediate: true, deep: true },
+)
+
+function loadSkillPreset() {
+  const p = SKILL_PRESETS.find((x) => x.id === skillPreset.value)
+  if (!p) return
+  skillName.value = p.name
+  skillCooldown.value = p.cooldownMs
+  skillSource.value = p.source
+  skillHint.value = `已载入预设：${p.label}`
+}
+
+function applyOnlineSkill() {
+  emit('updateSkill', {
+    name: skillName.value,
+    cooldownMs: skillCooldown.value,
+    source: skillSource.value,
+    unload: false,
+  })
+}
+
+function unloadOnlineSkill() {
+  emit('updateSkill', {
+    unload: true,
+  })
 }
 </script>
 
@@ -89,7 +136,6 @@ function hasEnemy(r, c) {
       <div class="actions">
         <button type="button" @click="emit('leave')">离开</button>
         <button v-if="amOwner()" type="button" class="danger" @click="emit('closeRoom')">解散房间</button>
-        <button v-if="room.status === 'playing'" type="button" class="primary" @click="emit('play')">进入对战</button>
       </div>
     </header>
 
@@ -123,7 +169,33 @@ function hasEnemy(r, c) {
       />
     </section>
 
-    <section class="panel row">
+    <section class="panel">
+      <h3>联机技能工坊</h3>
+      <p class="muted">{{ roomSkillText }}</p>
+      <template v-if="mePlayer()">
+        <label>预设</label>
+        <div class="lab-row">
+          <select v-model="skillPreset">
+            <option v-for="p in SKILL_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </select>
+          <button type="button" :disabled="!connected" @click="loadSkillPreset">载入</button>
+        </div>
+        <label>技能名</label>
+        <input v-model="skillName" />
+        <label>冷却(ms)</label>
+        <input v-model.number="skillCooldown" type="number" min="0" step="100" />
+        <label>代码（函数或对象表达式）</label>
+        <textarea v-model="skillSource" rows="9" spellcheck="false" />
+        <div class="lab-row">
+          <button type="button" class="primary" :disabled="!connected" @click="applyOnlineSkill">同步我的技能</button>
+          <button type="button" :disabled="!connected" @click="unloadOnlineSkill">卸载</button>
+        </div>
+        <p class="hint">{{ skillHint }}</p>
+      </template>
+      <p v-else class="muted">观战席不可编辑技能；上场玩家可各自配置。</p>
+    </section>
+
+    <section class="panel row action-bar">
       <button v-if="mePlayer()" type="button" :disabled="!connected" @click="emit('ready', !mePlayer().ready)">
         {{ mePlayer().ready ? '取消准备' : '准备' }}
       </button>
@@ -145,6 +217,7 @@ function hasEnemy(r, c) {
 .room {
   display: grid;
   gap: 14px;
+  padding-bottom: 92px;
 }
 .top,
 .actions,
@@ -169,6 +242,35 @@ function hasEnemy(r, c) {
   padding: 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
 }
+.panel label {
+  display: block;
+  margin: 8px 0 6px;
+  color: rgba(232, 240, 234, 0.85);
+  font-size: 0.85rem;
+}
+.panel input,
+.panel select,
+.panel textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 8px 10px;
+}
+.panel textarea {
+  resize: vertical;
+}
+.lab-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.muted {
+  margin: 0 0 8px;
+  color: rgba(232, 240, 234, 0.74);
+  font-size: 0.85rem;
+}
 button {
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 10px;
@@ -188,6 +290,30 @@ button {
   margin-left: auto;
   font-size: 0.84rem;
   color: rgba(232, 240, 234, 0.78);
+}
+.action-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  width: min(1040px, calc(100vw - 24px));
+  z-index: 1200;
+  background:
+    linear-gradient(145deg, rgba(18, 28, 24, 0.92), rgba(10, 16, 14, 0.92)),
+    rgba(12, 18, 16, 0.9);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+@media (max-width: 760px) {
+  .action-bar {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    transform: none;
+    bottom: 10px;
+  }
 }
 .preview-head {
   display: flex;

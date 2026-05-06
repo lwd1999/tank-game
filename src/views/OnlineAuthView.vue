@@ -17,7 +17,8 @@ async function submit() {
     const res = await fn(username.value, password.value)
     emit('authed', res)
   } catch (e) {
-    error.value = e.message || '操作失败'
+    console.error('[online-auth]', e)
+    error.value = '操作失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -32,8 +33,8 @@ async function submit() {
       <button type="button" :class="{ on: mode === 'login' }" @click="mode = 'login'">登录</button>
       <button type="button" :class="{ on: mode === 'register' }" @click="mode = 'register'">注册</button>
     </div>
-    <input v-model.trim="username" placeholder="账号（>=3位）" />
-    <input v-model="password" type="password" placeholder="密码（>=6位）" />
+    <input v-model.trim="username" placeholder="账号" />
+    <input v-model="password" type="password" placeholder="密码" />
     <p v-if="error" class="err">{{ error }}</p>
     <div class="row">
       <button type="button" @click="emit('back')">返回</button>

@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, onMounted, onUnmounted } from 'vue'
 import { COLS, ROWS, CELL } from '../game/constants.js'
 import { loadCustomMap } from '../game/storage.js'
-import { createPlayState, stepGame } from '../game/engine.js'
+import { createPlayState, setCustomSkill, stepGame } from '../game/engine.js'
 import { loadSkins } from '../game/skinsStorage.js'
 import { drawBattlefield } from '../game/renderBattleCanvas.js'
 import {
@@ -17,6 +17,7 @@ import {
   setActionKeys,
   DEFAULT_CONTROL_SCHEME,
 } from '../game/inputMapper.js'
+import { SKILL_CODE_TEMPLATE, SKILL_PRESETS, compileSkillSource } from '../game/customSkillPresets.js'
 import CenterDialog from './CenterDialog.vue'
 
 const emit = defineEmits(['back', 'edit'])
@@ -34,6 +35,7 @@ const pendingActions = ref({
   p2ToggleWeapon: false,
   p2UseSkill: false,
 })
+const cursorCell = ref(null)
 
 const cellPx = ref(CELL)
 const canvasRef = ref(null)
@@ -57,6 +59,13 @@ const endOpen = ref(false)
 const endTitle = ref('')
 const endMessage = ref('')
 const endVariant = ref('primary')
+const skillLabOpen = ref(false)
+const skillPreset = ref('none')
+const skillApplyTarget = ref('both')
+const skillName = ref('自定义技能')
+const skillCooldown = ref(3200)
+const skillSource = ref(SKILL_CODE_TEMPLATE)
+const skillLabHint = ref('未装配技能：支持对象式脚本（onCast/onTick/onEvent）')
 
 const weaponHud = ref('炮弹')
 const skillHud = ref('跃迁就绪')
@@ -65,7 +74,7 @@ const p2SkillHud = ref('跃迁就绪')
 
 const helpMessage = computed(() => {
   const base =
-    `P1：${formatKeyList(controls.value.p1.up)}/${formatKeyList(controls.value.p1.down)}/${formatKeyList(controls.value.p1.left)}/${formatKeyList(controls.value.p1.right)} 移动，${formatKeyList(controls.value.p1.fire)} 射击，${formatKeyList(controls.value.p1.toggleWeapon)} 切换武器，${formatKeyList(controls.value.p1.skill)} 瞬移技能。\nP2：${formatKeyList(controls.value.p2.up)}/${formatKeyList(controls.value.p2.down)}/${formatKeyList(controls.value.p2.left)}/${formatKeyList(controls.value.p2.right)} 移动，${formatKeyList(controls.value.p2.fire)} 射击，${formatKeyList(controls.value.p2.toggleWeapon)} 切换武器，${formatKeyList(controls.value.p2.skill)} 瞬移技能。\n地图可配置多个出生点（当前前两个用于 P1/P2，后续可扩展）。\n双人互伤：P1/P2 可互相打中。\n激光可穿透砖墙/钢墙/草丛，并可一次贯穿多辆敌方坦克。\n敌方有轻型/突击/重型三类，血量不同，不再一炮全秒。\n自定义贴图与背景在「编辑地图」页上传。`
+    `P1：${formatKeyList(controls.value.p1.up)}/${formatKeyList(controls.value.p1.down)}/${formatKeyList(controls.value.p1.left)}/${formatKeyList(controls.value.p1.right)} 移动，${formatKeyList(controls.value.p1.fire)} 射击，${formatKeyList(controls.value.p1.toggleWeapon)} 切换武器，${formatKeyList(controls.value.p1.skill)} 施放“自定义技能”。\nP2：${formatKeyList(controls.value.p2.up)}/${formatKeyList(controls.value.p2.down)}/${formatKeyList(controls.value.p2.left)}/${formatKeyList(controls.value.p2.right)} 移动，${formatKeyList(controls.value.p2.fire)} 射击，${formatKeyList(controls.value.p2.toggleWeapon)} 切换武器，${formatKeyList(controls.value.p2.skill)} 技能。\n可在右侧“技能工坊”加载预设或实时编写脚本（支持 onCast/onTick/onEvent、getCursor、setTile、spawnEnemy、spawnProjectile），加载后立即可施放。\n地图可配置多个出生点（当前前两个用于 P1/P2，后续可扩展）。\n双人互伤：P1/P2 可互相打中。\n激光可穿透砖墙/钢墙/草丛，并可一次贯穿多辆敌方坦克。\n敌方有轻型/突击/重型三类，血量不同，不再一炮全秒。\n自定义贴图与背景在「编辑地图」页上传。`
   if (noEnemies.value) {
     return `${base}\n\n当前地图没有敌方坦克，无法达成胜利，仍可试玩。`
   }
@@ -124,15 +133,46 @@ function paint() {
   })
 }
 
+function updateCursorFromEvent(e) {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  const c = Math.floor(x / cellPx.value)
+  const r = Math.floor(y / cellPx.value)
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) {
+    cursorCell.value = null
+    return
+  }
+  cursorCell.value = { r, c }
+}
+
+function clearCursorCell() {
+  cursorCell.value = null
+}
+
 function updateWeaponHud(s) {
   const label = s.player.weapon === 'laser' ? '激光炮' : '炮弹'
   if (weaponHud.value !== label) weaponHud.value = label
   const p1SkillKey = formatKeyList(controls.value.p1.skill)
-  skillHud.value = s.player.skillCd <= 0 ? `跃迁就绪(${p1SkillKey})` : `跃迁冷却 ${Math.ceil(s.player.skillCd / 100) / 10}s`
+  const skillNameText = s.customSkills?.p1?.name || '未装配'
+  skillHud.value =
+    skillNameText === '未装配'
+      ? `未装配(${p1SkillKey})`
+      : s.player.skillCd <= 0
+        ? `${skillNameText}就绪(${p1SkillKey})`
+        : `${skillNameText}冷却 ${Math.ceil(s.player.skillCd / 100) / 10}s`
   const p2Label = s.ally?.weapon === 'laser' ? '激光炮' : '炮弹'
   p2WeaponHud.value = p2Label
   const p2SkillKey = formatKeyList(controls.value.p2.skill)
-  p2SkillHud.value = (s.ally?.skillCd || 0) <= 0 ? `跃迁就绪(${p2SkillKey})` : `跃迁冷却 ${Math.ceil((s.ally?.skillCd || 0) / 100) / 10}s`
+  const p2SkillName = s.customSkills?.p2?.name || '未装配'
+  p2SkillHud.value =
+    p2SkillName === '未装配'
+      ? `未装配(${p2SkillKey})`
+      : (s.ally?.skillCd || 0) <= 0
+        ? `${p2SkillName}就绪(${p2SkillKey})`
+        : `${p2SkillName}冷却 ${Math.ceil((s.ally?.skillCd || 0) / 100) / 10}s`
 }
 
 function updateCellSize() {
@@ -182,12 +222,51 @@ let last = 0
 function restart() {
   skins.value = loadSkins()
   state.value = createPlayState(loadCustomMap())
+  setCustomSkill(state.value, 'p1', null)
+  setCustomSkill(state.value, 'p2', null)
   endOpen.value = false
   last = performance.now()
   updateWeaponHud(state.value)
   resizeCanvas()
   paint()
   syncBattleImages().then(() => paint())
+}
+
+function loadPresetToEditor() {
+  const p = SKILL_PRESETS.find((x) => x.id === skillPreset.value)
+  if (!p) return
+  skillName.value = p.name
+  skillCooldown.value = p.cooldownMs
+  skillSource.value = p.source
+  skillLabHint.value = `已载入预设：${p.label}`
+}
+
+function unloadCustomSkill() {
+  if (skillApplyTarget.value === 'p1' || skillApplyTarget.value === 'both') setCustomSkill(state.value, 'p1', null)
+  if (skillApplyTarget.value === 'p2' || skillApplyTarget.value === 'both') setCustomSkill(state.value, 'p2', null)
+  skillLabHint.value = '已卸载所选对象技能'
+  updateWeaponHud(state.value)
+}
+
+function applyCustomSkill() {
+  try {
+    const runtimeDef = compileSkillSource(skillSource.value)
+    const name = String(skillName.value || '自定义技能').trim() || '自定义技能'
+    const cooldownMs = Math.max(0, Number(skillCooldown.value) || 0)
+    const skillDef = {
+      id: `custom-${Date.now()}`,
+      name,
+      cooldownMs,
+      ...runtimeDef,
+    }
+    if (skillApplyTarget.value === 'p1' || skillApplyTarget.value === 'both') setCustomSkill(state.value, 'p1', skillDef)
+    if (skillApplyTarget.value === 'p2' || skillApplyTarget.value === 'both') setCustomSkill(state.value, 'p2', skillDef)
+    const targetText = skillApplyTarget.value === 'both' ? 'P1+P2' : skillApplyTarget.value.toUpperCase()
+    skillLabHint.value = `技能“${name}”已装配到 ${targetText}，对应技能键可直接施放`
+    updateWeaponHud(state.value)
+  } catch (e) {
+    skillLabHint.value = `装配失败：${e?.message || '代码错误'}`
+  }
 }
 
 function loop(now) {
@@ -209,6 +288,8 @@ function loop(now) {
   const s = state.value
 
   const input = buildLocalInput(keys.value, pendingActions.value, controls.value)
+  input.cursor = cursorCell.value
+  input.p2.cursor = cursorCell.value
   pendingActions.value = {
     p1ToggleWeapon: false,
     p1UseSkill: false,
@@ -336,6 +417,8 @@ onMounted(async () => {
   await syncBattleImages()
   updateWeaponHud(state.value)
   paint()
+  canvasRef.value?.addEventListener('mousemove', updateCursorFromEvent)
+  canvasRef.value?.addEventListener('mouseleave', clearCursorCell)
   raf = requestAnimationFrame(loop)
 
   try {
@@ -351,6 +434,8 @@ onUnmounted(() => {
   window.removeEventListener('keyup', onUp)
   window.removeEventListener('resize', updateCellSize)
   document.removeEventListener('fullscreenchange', onFsChange)
+  canvasRef.value?.removeEventListener('mousemove', updateCursorFromEvent)
+  canvasRef.value?.removeEventListener('mouseleave', clearCursorCell)
   cancelAnimationFrame(raf)
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
 })
@@ -419,6 +504,7 @@ onUnmounted(() => {
         </button>
         <button type="button" class="tb tb-ghost" @click="helpOpen = true">说明</button>
         <button type="button" class="tb tb-ghost" @click="keybindOpen = true">改键</button>
+        <button type="button" class="tb tb-ghost" @click="skillLabOpen = !skillLabOpen">技能工坊</button>
       </nav>
     </header>
 
@@ -465,6 +551,33 @@ onUnmounted(() => {
         </span>
       </div>
     </footer>
+    <aside v-if="skillLabOpen" class="skill-lab">
+      <h3>技能工坊（运行时装配）</h3>
+      <label>预设</label>
+      <div class="lab-row">
+        <select v-model="skillPreset">
+          <option v-for="p in SKILL_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+        </select>
+        <button type="button" class="tb tb-ghost" @click="loadPresetToEditor">载入</button>
+      </div>
+      <label>装配对象</label>
+      <select v-model="skillApplyTarget">
+        <option value="both">P1 + P2</option>
+        <option value="p1">仅 P1</option>
+        <option value="p2">仅 P2</option>
+      </select>
+      <label>技能名</label>
+      <input v-model="skillName" />
+      <label>冷却(ms)</label>
+      <input v-model.number="skillCooldown" type="number" min="0" step="100" />
+      <label>代码（函数或对象表达式）</label>
+      <textarea v-model="skillSource" rows="12" spellcheck="false" />
+      <div class="lab-row">
+        <button type="button" class="tb" @click="applyCustomSkill">装配并启用</button>
+        <button type="button" class="tb tb-ghost" @click="unloadCustomSkill">卸载</button>
+      </div>
+      <p class="lab-hint">{{ skillLabHint }}</p>
+    </aside>
   </div>
 </template>
 
@@ -669,6 +782,54 @@ onUnmounted(() => {
   margin-top: 4px;
   font-size: 0.72rem;
   opacity: 0.8;
+}
+.skill-lab {
+  position: fixed;
+  right: 18px;
+  top: 92px;
+  width: min(360px, 42vw);
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  z-index: 9500;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 14, 12, 0.92);
+  display: grid;
+  gap: 8px;
+}
+.skill-lab h3 {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+}
+.skill-lab label {
+  font-size: 0.74rem;
+  opacity: 0.85;
+}
+.skill-lab select,
+.skill-lab input,
+.skill-lab textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  padding: 7px 8px;
+}
+.skill-lab textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+}
+.lab-row {
+  display: flex;
+  gap: 8px;
+}
+.lab-hint {
+  margin: 2px 0 0;
+  font-size: 0.74rem;
+  color: rgba(232, 240, 234, 0.82);
 }
 
 .keybind-body {
